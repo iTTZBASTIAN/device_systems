@@ -4,20 +4,13 @@ API REST desarrollada con **FastAPI** para la gestión del recurso **usuarios** 
 
 Este repositorio evoluciona a través de varias actividades:
 
-- **EV07** — API inicial: GET y POST.
-- **EV08** (actual) — CRUD completo, manejo de errores, códigos de estado HTTP, Dependency Injection y documentación Swagger/OpenAPI mejorada.
+- **EV07** — API inicial: GET y POST, datos en memoria.
+- **EV08** — CRUD completo (PUT/PATCH/DELETE), manejo de errores, Dependency Injection.
+- **EV09** (actual) — Persistencia real con **SQLAlchemy** y **SQLite**, reemplazando el almacenamiento en memoria.
 
-## Descripción (EV08)
+## Descripción (EV09)
 
-En esta versión la aplicación se reorganizó en capas para separar responsabilidades:
-
-- **routes** — definición de endpoints.
-- **schemas** — modelos Pydantic de entrada y salida.
-- **services** — lógica de negocio.
-- **dependencies** — funciones reutilizables con `Depends()`.
-- **data** — simulación de base de datos en memoria.
-
-Se agregaron los métodos **PUT**, **PATCH** y **DELETE**, manejo de errores con `HTTPException`, códigos de estado HTTP correctos, y una dependencia `get_user_or_404` que se reutiliza en todas las rutas que operan sobre un usuario existente.
+La API ya no guarda los usuarios en una lista: ahora se almacenan, consultan, actualizan y eliminan desde una base de datos SQLite mediante el ORM **SQLAlchemy**.
 
 ## Estructura del proyecto
 
@@ -25,16 +18,19 @@ Se agregaron los métodos **PUT**, **PATCH** y **DELETE**, manejo de errores con
 device_systems/
 ├── app/
 │   ├── main.py
-│   ├── routes/
-│   │   └── user_routes.py
+│   ├── database/
+│   │   └── connection.py
+│   ├── models/
+│   │   └── user_model.py
 │   ├── schemas/
 │   │   └── user_schema.py
+│   ├── routes/
+│   │   └── user_routes.py
 │   ├── services/
 │   │   └── user_service.py
-│   ├── dependencies/
-│   │   └── user_dependencies.py
-│   └── data/
-│       └── users_db.py
+│   └── dependencies/
+│       ├── database_dependency.py
+│       └── user_dependencies.py
 ├── requirements.txt
 └── README.md
 ```
@@ -55,41 +51,61 @@ Desde la carpeta raíz del proyecto (`device_systems/`):
 uvicorn app.main:app --reload
 ```
 
+Al iniciar, se crea automáticamente el archivo `device_systems.db` (SQLite) con la tabla `users`, si no existe.
+
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
 
-## Modelo de usuario
+## Diferencia entre modelo SQLAlchemy y schema Pydantic
 
-| Campo     | Tipo   | Validación                                   |
-|-----------|--------|-----------------------------------------------|
-| id        | int    | Generado automáticamente                     |
-| name      | str    | Obligatorio, mínimo 3 caracteres             |
-| email     | str    | Formato de correo válido, único              |
-| role      | str    | Uno de: `admin`, `support`, `user`           |
-| is_active | bool   | Valor por defecto `true`                     |
+Son dos representaciones distintas del mismo concepto ("usuario"), con propósitos diferentes:
+
+- **Modelo SQLAlchemy** (`app/models/user_model.py`, clase `User`): representa la **tabla en la base de datos**. Define columnas, tipos de dato (`Integer`, `String`, `Boolean`, `DateTime`) y restricciones a nivel de base de datos (`nullable=False`, `unique=True`). Es lo que SQLAlchemy usa para generar el SQL y persistir los datos en disco.
+- **Schema Pydantic** (`app/schemas/user_schema.py`, clases `UserCreate`, `UserUpdate`, `UserPatch`, `UserResponse`): representa la **forma de los datos que entran y salen por la API HTTP**. Se usa para validar lo que envía el cliente, para documentar Swagger/OpenAPI, y para decidir exactamente qué campos se exponen en la respuesta (por ejemplo, nunca se expone un campo que no exista en el schema, aunque exista en el modelo).
+
+En resumen: el modelo habla con la base de datos; el schema habla con el cliente de la API. Mantenerlos separados permite, por ejemplo, cambiar la base de datos sin tocar los contratos de la API, o exigir campos distintos al crear (`UserCreate`) que al responder (`UserResponse`, que además incluye `id` y `created_at`, generados por el servidor).
+
+## Modelo de datos (tabla `users`)
+
+| Campo      | Tipo     | Restricción                     |
+|------------|----------|----------------------------------|
+| id         | Integer  | Primary Key                     |
+| name       | String   | Obligatorio                     |
+| email      | String   | Único y obligatorio             |
+| role       | String   | Obligatorio (admin/support/user)|
+| is_active  | Boolean  | Valor por defecto `true`        |
+| created_at | DateTime | Fecha de creación (automática)  |
 
 ## Tabla de endpoints
 
-| Método | Ruta               | Descripción                        | Código éxito | Errores posibles          |
-|--------|--------------------|--------------------------------------|--------------|----------------------------|
-| GET    | `/users`           | Lista usuarios (filtrable)          | 200 OK       | —                          |
-| GET    | `/users/{id}`      | Consulta un usuario                  | 200 OK       | 404 Not Found              |
-| POST   | `/users`           | Crea un usuario                      | 201 Created  | 400 (email duplicado), 422 |
-| PUT    | `/users/{id}`      | Reemplaza el usuario completo        | 200 OK       | 404, 400 (email duplicado) |
-| PATCH  | `/users/{id}`      | Actualiza campos parciales           | 200 OK       | 404, 400 (sin datos o email duplicado) |
-| DELETE | `/users/{id}`      | Elimina un usuario                   | 204 No Content | 404 Not Found            |
+| Método | Ruta          | Descripción                        | Código éxito   | Errores posibles           |
+|--------|---------------|--------------------------------------|----------------|------------------------------|
+| GET    | `/users`      | Lista usuarios (filtro + orden)     | 200 OK         | —                            |
+| GET    | `/users/{id}` | Consulta un usuario                  | 200 OK         | 404 Not Found                |
+| POST   | `/users`      | Crea un usuario                      | 201 Created    | 400 (email duplicado), 422   |
+| PUT    | `/users/{id}` | Reemplaza el usuario completo        | 200 OK         | 404, 400 (email duplicado)   |
+| PATCH  | `/users/{id}` | Actualiza campos parciales           | 200 OK         | 404, 400 (sin datos/email duplicado) |
+| DELETE | `/users/{id}` | Elimina un usuario                   | 204 No Content | 404 Not Found                |
+
+Filtros disponibles en `GET /users`: `?role=`, `?is_active=`, `?order_by=name` o `?order_by=created_at`.
 
 ## Ejemplos de peticiones
 
-### PUT /users/1 (reemplazo completo)
+### Crear usuario
 
 ```bash
-curl -X PUT http://127.0.0.1:8000/users/1 \
+curl -X POST http://127.0.0.1:8000/users \
   -H "Content-Type: application/json" \
-  -d '{"name":"Ana Pérez G.","email":"ana@sena.edu.co","role":"admin","is_active":true}'
+  -d '{"name":"Laura Rojas","email":"laura@sena.edu.co","role":"support","is_active":true}'
 ```
 
-### PATCH /users/1 (actualización parcial)
+### Listar usuarios activos ordenados por nombre
+
+```bash
+curl "http://127.0.0.1:8000/users?is_active=true&order_by=name"
+```
+
+### Actualización parcial
 
 ```bash
 curl -X PATCH http://127.0.0.1:8000/users/1 \
@@ -97,40 +113,20 @@ curl -X PATCH http://127.0.0.1:8000/users/1 \
   -d '{"role":"support"}'
 ```
 
-### PATCH vacío (debe fallar con 400)
-
-```bash
-curl -X PATCH http://127.0.0.1:8000/users/1 \
-  -H "Content-Type: application/json" \
-  -d '{}'
-```
-
-### DELETE /users/2
+### Eliminar usuario
 
 ```bash
 curl -i -X DELETE http://127.0.0.1:8000/users/2
 ```
 
-Respuesta esperada: `204 No Content` (sin cuerpo).
-
 ## Manejo de errores
-
-La API responde con un cuerpo consistente en los errores controlados:
-
-```json
-{ "detail": "Usuario no encontrado" }
-```
 
 | Caso                              | Código |
 |-----------------------------------|--------|
 | Usuario no encontrado             | 404    |
 | Correo duplicado                  | 400    |
 | PATCH sin campos                  | 400    |
-| Error de validación (Pydantic)    | 422    |
-
-## Dependency Injection
-
-`app/dependencies/user_dependencies.py` define `get_user_or_404`, usada mediante `Depends()` en `GET /users/{id}`, `PUT`, `PATCH` y `DELETE`, evitando repetir la búsqueda y el manejo del 404 en cada ruta.
+| Rol no permitido / datos inválidos| 422    |
 
 ## Cabeceras personalizadas
 
@@ -138,53 +134,55 @@ Toda respuesta incluye:
 
 ```
 X-App-Name: device_systems
-X-API-Version: 2.0.0
+X-API-Version: 3.0.0
 ```
 
-## Capturas de Swagger UI
+## Capturas
 
-![vista general](images/vista-general.png)
+![Reorganizacion de carpetas](images/reorganizacion-carpetas.png)
 
-![vista general](images/vista-general1.png)
+![Archivo DB](images/archivo-db.png)
 
-![GET users](images/get-users.png)
+![Vista general](images/vista-general.png)
 
-![GET users](images/get-users1.png)
+![Vista general](images/vista-general1.png)
 
-![GET users (ID)](images/get-users-id.png)
+![POST usuario](images/post-users.png)
 
-![GET users (ID)](images/get-users-id1.png)
+![POST usuario](images/post-users1.png)
 
-![POST users](images/post-users.png)
+![POST usuario error](images/post-users-error.png)
 
-![POST users](images/post-users1.png)
+![POST usuario error](images/post-users-error1.png)
 
-![POST users (error)](images/post-users-error.png)
+![GET usuarios](images/get-users.png)
 
-![POST users (error)](images/post-users-error1.png)
+![GET usuarios filtro rol](images/filter-admin.png)
 
-![PATCH users](images/patch-users.png)
+![GET usuarios filtro is-active](images/filter-is-active.png)
 
-![PATCH users](images/patch-users1.png)
+![GET usuarios filtro name](images/filter-name.png)
 
-![PATCH users (error)](images/patch-users-error.png)
+![GET usuarios ID](images/get-users-id.png)
 
-![PATCH users (error)](images/patch-users-error1.png)
+![GET usuarios ID](images/get-users-id1.png)
 
-![PUT users](images/put-users.png)
+![GET usuarios ID (error)](images/get-users-id-error.png)
 
-![PUT users](images/put-users1.png)
+![GET usuarios ID (error)](images/get-users-id-error1.png)
 
-![PUT users (error)](images/put-users-error.png)
+![PUT usuarios](images/put-users.png.png)
 
-![PUT users (error)](images/put-users-error1.png)
+![PUT usuarios](images/put-users.png1.png)
 
-![DELETE users](images/delete-users.png)
+![PUT usuarios (error)](images/put-users-error.png)
 
-![DELETE users (error)](images/delete-users-error.png)
+![PUT usuarios (error)](images/put-users-error1.png)
 
-![DELETE users (error)](images/delete-users-error1.png)
+![DELETE usuarios](images/delete-user.png)
 
-## Reflexión
+![DELETE validacion](images/delete-validation.png)
 
-esta actividad nos permite reforzar las solicitudes JSON agregando PUT,PATCH y DELETE, completando el CRUD e investigando más a fondo sobre el manejo de errores, códigos de estado HTTP, Dependency Injection y documentación Swagger/OpenAPI mejorada.
+## Reflexión final
+
+Esta actividad nos permite poner en practica el uso de una base de datos vinculandola con APIrest, usando SQLAlchemy y SQLite, reemplazando el almacenamiento en memoria.
