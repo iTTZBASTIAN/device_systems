@@ -1,29 +1,28 @@
 """
-<<<<<<< HEAD
-device_systems - API REST para la gestión de usuarios (EV07).
-=======
 device_systems - API REST para la gestión de usuarios.
 
 EV07: GET y POST.
 EV08: + PUT, PATCH, DELETE, manejo de errores, Dependency Injection
 y documentación Swagger/OpenAPI mejorada.
->>>>>>> feature/ev08
+EV09: + persistencia real con SQLAlchemy y SQLite (reemplaza el
+almacenamiento en memoria de las versiones anteriores).
 """
 
 from fastapi import FastAPI, Request
 
+from app.database.connection import Base, engine
+from app.models import user_model  # noqa: F401 - necesario para registrar el modelo en Base
 from app.routes.user_routes import router as user_router
 
 APP_NAME = "device_systems"
-<<<<<<< HEAD
-API_VERSION = "1.0"
-=======
-API_VERSION = "2.0.0"
->>>>>>> feature/ev08
+API_VERSION = "3.0.0"
+
+# Crea las tablas en la base de datos si no existen todavía.
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="device_systems API",
-    description="API REST para la gestión de usuarios del sistema device_systems.",
+    description="API REST para la gestión de usuarios del sistema device_systems, con persistencia en base de datos vía SQLAlchemy.",
     version=API_VERSION,
 )
 

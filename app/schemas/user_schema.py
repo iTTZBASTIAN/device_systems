@@ -1,14 +1,18 @@
 """
 Schemas Pydantic v2 para el recurso 'users' de device_systems.
 
+Importante: estos schemas son distintos del modelo SQLAlchemy
+(app/models/user_model.py). El modelo representa la tabla en la base
+de datos; los schemas representan la forma de los datos que entran y
+salen por la API (y permiten validar, ocultar u ordenar campos de
+forma independiente de la tabla).
+
 Roles permitidos: admin, support, user.
 """
 
-<<<<<<< HEAD
-from typing import Literal
-=======
+from datetime import datetime
 from typing import Literal, Optional
->>>>>>> feature/ev08
+
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 
@@ -45,8 +49,6 @@ class UserCreate(UserBase):
     pass
 
 
-<<<<<<< HEAD
-=======
 class UserUpdate(UserBase):
     """
     Actualización completa de un usuario (PUT /users/{id}).
@@ -74,10 +76,12 @@ class UserPatch(BaseModel):
         )
 
 
->>>>>>> feature/ev08
 class UserResponse(UserBase):
     """Modelo de salida: lo que la API devuelve al cliente."""
 
     id: int = Field(..., description="Identificador único del usuario.")
+    created_at: datetime = Field(..., description="Fecha y hora de creación del usuario.")
 
+    # from_attributes=True permite construir este schema directamente
+    # a partir de un objeto SQLAlchemy (el modelo User), no solo de un dict.
     model_config = ConfigDict(from_attributes=True)
