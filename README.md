@@ -185,4 +185,4 @@ X-API-Version: 3.0.0
 
 ## Reflexión final
 
-_(Pendiente: agregar reflexión personal sobre la importancia de usar persistencia real en una API REST, en comparación con almacenar datos en memoria.)_
+Esta actividad nos permite poner en practica el uso de una base de datos vinculandola con APIrest, usando SQLAlchemy y SQLite, reemplazando el almacenamiento en memoria.
