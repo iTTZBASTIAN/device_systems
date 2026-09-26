@@ -157,8 +157,6 @@ X-API-Version: 3.0.0
 
 ![GET usuarios](images/get-users.png)
 
-![GET usuarios](images/get-users1.png)
-
 ![GET usuarios filtro rol](images/filter-admin.png)
 
 ![GET usuarios filtro is-active](images/filter-is-active.png)
