@@ -10,6 +10,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.user_model import User
+from app.models.loan_model import Loan
 from app.schemas.user_schema import UserCreate, UserUpdate, UserPatch
 
 
@@ -98,5 +99,10 @@ def patch_user(db: Session, user: User, data: UserPatch) -> User:
 
 
 def delete_user(db: Session, user: User) -> None:
+    if db.query(Loan).filter(Loan.user_id == user.id).first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No se puede eliminar un usuario con historial de préstamos",
+        )
     db.delete(user)
     db.commit()
