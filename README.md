@@ -1,19 +1,23 @@
 # device_systems
 
-API REST desarrollada con **FastAPI** para la gestión del recurso **usuarios**, correspondiente a la actividad **GA1-220501096-01-AA1-EV07 — Fundamentos de FastAPI: API REST para Gestión de Usuarios**.
+API REST desarrollada con **FastAPI** para la gestión del recurso **usuarios** del sistema `device_systems`.
 
-## Descripción
+Este repositorio evoluciona a través de varias actividades:
 
-`device_systems` expone un CRUD parcial (GET y POST) sobre el recurso `/users`, aplicando:
+- **EV07** — API inicial: GET y POST.
+- **EV08** (actual) — CRUD completo, manejo de errores, códigos de estado HTTP, Dependency Injection y documentación Swagger/OpenAPI mejorada.
 
-- Validación de datos con **Pydantic v2**.
-- **Path Parameters** (`/users/{user_id}`).
-- **Query Parameters** (`?role=`, `?is_active=`).
-- **Response Models** para controlar qué datos se exponen.
-- **Cabeceras HTTP personalizadas** (`X-App-Name`, `X-API-Version`) en cada respuesta.
-- Control de correos duplicados al crear un usuario.
+## Descripción (EV08)
 
-En esta actividad los usuarios se almacenan en memoria (una lista). La persistencia en base de datos con SQLAlchemy se implementa en la actividad EV09.
+En esta versión la aplicación se reorganizó en capas para separar responsabilidades:
+
+- **routes** — definición de endpoints.
+- **schemas** — modelos Pydantic de entrada y salida.
+- **services** — lógica de negocio.
+- **dependencies** — funciones reutilizables con `Depends()`.
+- **data** — simulación de base de datos en memoria.
+
+Se agregaron los métodos **PUT**, **PATCH** y **DELETE**, manejo de errores con `HTTPException`, códigos de estado HTTP correctos, y una dependencia `get_user_or_404` que se reutiliza en todas las rutas que operan sobre un usuario existente.
 
 ## Estructura del proyecto
 
@@ -21,10 +25,16 @@ En esta actividad los usuarios se almacenan en memoria (una lista). La persisten
 device_systems/
 ├── app/
 │   ├── main.py
+│   ├── routes/
+│   │   └── user_routes.py
 │   ├── schemas/
 │   │   └── user_schema.py
-│   └── routes/
-│       └── user_routes.py
+│   ├── services/
+│   │   └── user_service.py
+│   ├── dependencies/
+│   │   └── user_dependencies.py
+│   └── data/
+│       └── users_db.py
 ├── requirements.txt
 └── README.md
 ```
@@ -45,10 +55,6 @@ Desde la carpeta raíz del proyecto (`device_systems/`):
 uvicorn app.main:app --reload
 ```
 
-La API quedará disponible en `http://127.0.0.1:8000`.
-
-Documentación interactiva:
-
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
 
@@ -64,110 +70,121 @@ Documentación interactiva:
 
 ## Tabla de endpoints
 
-| Método | Ruta                     | Descripción                              | Código éxito |
-|--------|--------------------------|-------------------------------------------|--------------|
-| GET    | `/users`                 | Lista todos los usuarios                  | 200 OK       |
-| GET    | `/users?role=admin`      | Filtra usuarios por rol                   | 200 OK       |
-| GET    | `/users?is_active=true`  | Filtra usuarios activos/inactivos         | 200 OK       |
-| GET    | `/users/{user_id}`       | Consulta un usuario por ID                | 200 OK / 404 |
-| POST   | `/users`                 | Crea un nuevo usuario                     | 201 Created / 400 |
+| Método | Ruta               | Descripción                        | Código éxito | Errores posibles          |
+|--------|--------------------|--------------------------------------|--------------|----------------------------|
+| GET    | `/users`           | Lista usuarios (filtrable)          | 200 OK       | —                          |
+| GET    | `/users/{id}`      | Consulta un usuario                  | 200 OK       | 404 Not Found              |
+| POST   | `/users`           | Crea un usuario                      | 201 Created  | 400 (email duplicado), 422 |
+| PUT    | `/users/{id}`      | Reemplaza el usuario completo        | 200 OK       | 404, 400 (email duplicado) |
+| PATCH  | `/users/{id}`      | Actualiza campos parciales           | 200 OK       | 404, 400 (sin datos o email duplicado) |
+| DELETE | `/users/{id}`      | Elimina un usuario                   | 204 No Content | 404 Not Found            |
 
 ## Ejemplos de peticiones
 
-### GET /users
+### PUT /users/1 (reemplazo completo)
 
 ```bash
-curl http://127.0.0.1:8000/users
-```
-
-### GET /users/1
-
-```bash
-curl http://127.0.0.1:8000/users/1
-```
-
-### GET /users?role=admin
-
-```bash
-curl "http://127.0.0.1:8000/users?role=admin"
-```
-
-### POST /users
-
-```bash
-curl -X POST http://127.0.0.1:8000/users \
+curl -X PUT http://127.0.0.1:8000/users/1 \
   -H "Content-Type: application/json" \
-  -d '{
-        "name": "Laura Rojas",
-        "email": "laura@sena.edu.co",
-        "role": "support",
-        "is_active": true
-      }'
+  -d '{"name":"Ana Pérez G.","email":"ana@sena.edu.co","role":"admin","is_active":true}'
 ```
 
-Respuesta esperada (201 Created):
+### PATCH /users/1 (actualización parcial)
+
+```bash
+curl -X PATCH http://127.0.0.1:8000/users/1 \
+  -H "Content-Type: application/json" \
+  -d '{"role":"support"}'
+```
+
+### PATCH vacío (debe fallar con 400)
+
+```bash
+curl -X PATCH http://127.0.0.1:8000/users/1 \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+### DELETE /users/2
+
+```bash
+curl -i -X DELETE http://127.0.0.1:8000/users/2
+```
+
+Respuesta esperada: `204 No Content` (sin cuerpo).
+
+## Manejo de errores
+
+La API responde con un cuerpo consistente en los errores controlados:
 
 ```json
-{
-  "id": 3,
-  "name": "Laura Rojas",
-  "email": "laura@sena.edu.co",
-  "role": "support",
-  "is_active": true
-}
+{ "detail": "Usuario no encontrado" }
 ```
 
-### Intentar crear un correo duplicado
+| Caso                              | Código |
+|-----------------------------------|--------|
+| Usuario no encontrado             | 404    |
+| Correo duplicado                  | 400    |
+| PATCH sin campos                  | 400    |
+| Error de validación (Pydantic)    | 422    |
 
-```bash
-curl -X POST http://127.0.0.1:8000/users \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Otro","email":"ana@sena.edu.co","role":"user","is_active":true}'
-```
+## Dependency Injection
 
-Respuesta esperada (400 Bad Request):
-
-```json
-{ "detail": "El correo ya está registrado" }
-```
+`app/dependencies/user_dependencies.py` define `get_user_or_404`, usada mediante `Depends()` en `GET /users/{id}`, `PUT`, `PATCH` y `DELETE`, evitando repetir la búsqueda y el manejo del 404 en cada ruta.
 
 ## Cabeceras personalizadas
 
-Toda respuesta de la API incluye:
+Toda respuesta incluye:
 
 ```
 X-App-Name: device_systems
-X-API-Version: 1.0
-```
-
-Se pueden verificar con:
-
-```bash
-curl -i http://127.0.0.1:8000/users
+X-API-Version: 2.0.0
 ```
 
 ## Capturas de Swagger UI
 
-[vista general](images/vista1.png)
+![vista general](images/vista-general.png)
 
-[vista general](images/vista2.png)
+![vista general](images/vista-general1.png)
 
-[GET users](images/Get-users.png)
+![GET users](images/get-users.png)
 
-[GET users](images/Get-users1.png)
+![GET users](images/get-users1.png)
 
-[GET users por id](images/get-users-id.png)
+![GET users (ID)](images/get-users-id.png)
 
-[GET users por id](images/get-users-id1.png)
+![GET users (ID)](images/get-users-id1.png)
 
-[GET users por id (error)](images/get-users-id-error.png)
+![POST users](images/post-users.png)
 
-[GET users por id (error)](images/get-users-id-error1.png)
+![POST users](images/post-users1.png)
 
-[POST users](images/post-users.png)
+![POST users (error)](images/post-users-error.png)
 
-[POST users](images/post-users1.png)
+![POST users (error)](images/post-users-error1.png)
+
+![PATCH users](images/patch-users.png)
+
+![PATCH users](images/patch-users1.png)
+
+![PATCH users (error)](images/patch-users-error.png)
+
+![PATCH users (error)](images/patch-users-error1.png)
+
+![PUT users](images/put-users.png)
+
+![PUT users](images/put-users1.png)
+
+![PUT users (error)](images/put-users-error.png)
+
+![PUT users (error)](images/put-users-error1.png)
+
+![DELETE users](images/delete-users.png)
+
+![DELETE users (error)](images/delete-users-error.png)
+
+![DELETE users (error)](images/delete-users-error1.png)
 
 ## Reflexión
 
-Este ejercicio nos permite entender como desarrollar un proyecto con fastAPI, usando Pydantic v2 y uvicorn, entendiendo la conexión y la lógica de JSON
+esta actividad nos permite reforzar las solicitudes JSON agregando PUT,PATCH y DELETE, completando el CRUD e investigando más a fondo sobre el manejo de errores, códigos de estado HTTP, Dependency Injection y documentación Swagger/OpenAPI mejorada.

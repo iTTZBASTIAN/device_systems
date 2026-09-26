@@ -4,7 +4,11 @@ Schemas Pydantic v2 para el recurso 'users' de device_systems.
 Roles permitidos: admin, support, user.
 """
 
+<<<<<<< HEAD
 from typing import Literal
+=======
+from typing import Literal, Optional
+>>>>>>> feature/ev08
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 
@@ -41,6 +45,36 @@ class UserCreate(UserBase):
     pass
 
 
+<<<<<<< HEAD
+=======
+class UserUpdate(UserBase):
+    """
+    Actualización completa de un usuario (PUT /users/{id}).
+    Requiere todos los campos, ya que reemplaza el recurso por completo.
+    """
+    pass
+
+
+class UserPatch(BaseModel):
+    """
+    Actualización parcial de un usuario (PATCH /users/{id}).
+    Todos los campos son opcionales: solo se modifica lo que se envíe.
+    """
+
+    name: Optional[str] = Field(None, min_length=3)
+    email: Optional[EmailStr] = None
+    role: Optional[RoleType] = None
+    is_active: Optional[bool] = None
+
+    def has_data(self) -> bool:
+        """True si el cliente envió al menos un campo para actualizar."""
+        return any(
+            value is not None
+            for value in self.model_dump(exclude_unset=True).values()
+        )
+
+
+>>>>>>> feature/ev08
 class UserResponse(UserBase):
     """Modelo de salida: lo que la API devuelve al cliente."""
 

@@ -1,5 +1,13 @@
 """
+<<<<<<< HEAD
 device_systems - API REST para la gestión de usuarios (EV07).
+=======
+device_systems - API REST para la gestión de usuarios.
+
+EV07: GET y POST.
+EV08: + PUT, PATCH, DELETE, manejo de errores, Dependency Injection
+y documentación Swagger/OpenAPI mejorada.
+>>>>>>> feature/ev08
 """
 
 from fastapi import FastAPI, Request
@@ -7,7 +15,11 @@ from fastapi import FastAPI, Request
 from app.routes.user_routes import router as user_router
 
 APP_NAME = "device_systems"
+<<<<<<< HEAD
 API_VERSION = "1.0"
+=======
+API_VERSION = "2.0.0"
+>>>>>>> feature/ev08
 
 app = FastAPI(
     title="device_systems API",
