@@ -1,19 +1,16 @@
 # device_systems
 
-API REST desarrollada con **FastAPI** para la gestión del recurso **usuarios**, correspondiente a la actividad **GA1-220501096-01-AA1-EV07 — Fundamentos de FastAPI: API REST para Gestión de Usuarios**.
+API REST desarrollada con **FastAPI** para la gestión del recurso **usuarios** del sistema `device_systems`.
 
-## Descripción
+Este repositorio evoluciona a través de varias actividades:
 
-`device_systems` expone un CRUD parcial (GET y POST) sobre el recurso `/users`, aplicando:
+- **EV07** — API inicial: GET y POST, datos en memoria.
+- **EV08** — CRUD completo (PUT/PATCH/DELETE), manejo de errores, Dependency Injection.
+- **EV09** (actual) — Persistencia real con **SQLAlchemy** y **SQLite**, reemplazando el almacenamiento en memoria.
 
-- Validación de datos con **Pydantic v2**.
-- **Path Parameters** (`/users/{user_id}`).
-- **Query Parameters** (`?role=`, `?is_active=`).
-- **Response Models** para controlar qué datos se exponen.
-- **Cabeceras HTTP personalizadas** (`X-App-Name`, `X-API-Version`) en cada respuesta.
-- Control de correos duplicados al crear un usuario.
+## Descripción (EV09)
 
-En esta actividad los usuarios se almacenan en memoria (una lista). La persistencia en base de datos con SQLAlchemy se implementa en la actividad EV09.
+La API ya no guarda los usuarios en una lista: ahora se almacenan, consultan, actualizan y eliminan desde una base de datos SQLite mediante el ORM **SQLAlchemy**.
 
 ## Estructura del proyecto
 
@@ -21,10 +18,19 @@ En esta actividad los usuarios se almacenan en memoria (una lista). La persisten
 device_systems/
 ├── app/
 │   ├── main.py
+│   ├── database/
+│   │   └── connection.py
+│   ├── models/
+│   │   └── user_model.py
 │   ├── schemas/
 │   │   └── user_schema.py
-│   └── routes/
-│       └── user_routes.py
+│   ├── routes/
+│   │   └── user_routes.py
+│   ├── services/
+│   │   └── user_service.py
+│   └── dependencies/
+│       ├── database_dependency.py
+│       └── user_dependencies.py
 ├── requirements.txt
 └── README.md
 ```
@@ -45,129 +51,138 @@ Desde la carpeta raíz del proyecto (`device_systems/`):
 uvicorn app.main:app --reload
 ```
 
-La API quedará disponible en `http://127.0.0.1:8000`.
-
-Documentación interactiva:
+Al iniciar, se crea automáticamente el archivo `device_systems.db` (SQLite) con la tabla `users`, si no existe.
 
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
 
-## Modelo de usuario
+## Diferencia entre modelo SQLAlchemy y schema Pydantic
 
-| Campo     | Tipo   | Validación                                   |
-|-----------|--------|-----------------------------------------------|
-| id        | int    | Generado automáticamente                     |
-| name      | str    | Obligatorio, mínimo 3 caracteres             |
-| email     | str    | Formato de correo válido, único              |
-| role      | str    | Uno de: `admin`, `support`, `user`           |
-| is_active | bool   | Valor por defecto `true`                     |
+Son dos representaciones distintas del mismo concepto ("usuario"), con propósitos diferentes:
+
+- **Modelo SQLAlchemy** (`app/models/user_model.py`, clase `User`): representa la **tabla en la base de datos**. Define columnas, tipos de dato (`Integer`, `String`, `Boolean`, `DateTime`) y restricciones a nivel de base de datos (`nullable=False`, `unique=True`). Es lo que SQLAlchemy usa para generar el SQL y persistir los datos en disco.
+- **Schema Pydantic** (`app/schemas/user_schema.py`, clases `UserCreate`, `UserUpdate`, `UserPatch`, `UserResponse`): representa la **forma de los datos que entran y salen por la API HTTP**. Se usa para validar lo que envía el cliente, para documentar Swagger/OpenAPI, y para decidir exactamente qué campos se exponen en la respuesta (por ejemplo, nunca se expone un campo que no exista en el schema, aunque exista en el modelo).
+
+En resumen: el modelo habla con la base de datos; el schema habla con el cliente de la API. Mantenerlos separados permite, por ejemplo, cambiar la base de datos sin tocar los contratos de la API, o exigir campos distintos al crear (`UserCreate`) que al responder (`UserResponse`, que además incluye `id` y `created_at`, generados por el servidor).
+
+## Modelo de datos (tabla `users`)
+
+| Campo      | Tipo     | Restricción                     |
+|------------|----------|----------------------------------|
+| id         | Integer  | Primary Key                     |
+| name       | String   | Obligatorio                     |
+| email      | String   | Único y obligatorio             |
+| role       | String   | Obligatorio (admin/support/user)|
+| is_active  | Boolean  | Valor por defecto `true`        |
+| created_at | DateTime | Fecha de creación (automática)  |
 
 ## Tabla de endpoints
 
-| Método | Ruta                     | Descripción                              | Código éxito |
-|--------|--------------------------|-------------------------------------------|--------------|
-| GET    | `/users`                 | Lista todos los usuarios                  | 200 OK       |
-| GET    | `/users?role=admin`      | Filtra usuarios por rol                   | 200 OK       |
-| GET    | `/users?is_active=true`  | Filtra usuarios activos/inactivos         | 200 OK       |
-| GET    | `/users/{user_id}`       | Consulta un usuario por ID                | 200 OK / 404 |
-| POST   | `/users`                 | Crea un nuevo usuario                     | 201 Created / 400 |
+| Método | Ruta          | Descripción                        | Código éxito   | Errores posibles           |
+|--------|---------------|--------------------------------------|----------------|------------------------------|
+| GET    | `/users`      | Lista usuarios (filtro + orden)     | 200 OK         | —                            |
+| GET    | `/users/{id}` | Consulta un usuario                  | 200 OK         | 404 Not Found                |
+| POST   | `/users`      | Crea un usuario                      | 201 Created    | 400 (email duplicado), 422   |
+| PUT    | `/users/{id}` | Reemplaza el usuario completo        | 200 OK         | 404, 400 (email duplicado)   |
+| PATCH  | `/users/{id}` | Actualiza campos parciales           | 200 OK         | 404, 400 (sin datos/email duplicado) |
+| DELETE | `/users/{id}` | Elimina un usuario                   | 204 No Content | 404 Not Found                |
+
+Filtros disponibles en `GET /users`: `?role=`, `?is_active=`, `?order_by=name` o `?order_by=created_at`.
 
 ## Ejemplos de peticiones
 
-### GET /users
-
-```bash
-curl http://127.0.0.1:8000/users
-```
-
-### GET /users/1
-
-```bash
-curl http://127.0.0.1:8000/users/1
-```
-
-### GET /users?role=admin
-
-```bash
-curl "http://127.0.0.1:8000/users?role=admin"
-```
-
-### POST /users
+### Crear usuario
 
 ```bash
 curl -X POST http://127.0.0.1:8000/users \
   -H "Content-Type: application/json" \
-  -d '{
-        "name": "Laura Rojas",
-        "email": "laura@sena.edu.co",
-        "role": "support",
-        "is_active": true
-      }'
+  -d '{"name":"Laura Rojas","email":"laura@sena.edu.co","role":"support","is_active":true}'
 ```
 
-Respuesta esperada (201 Created):
-
-```json
-{
-  "id": 3,
-  "name": "Laura Rojas",
-  "email": "laura@sena.edu.co",
-  "role": "support",
-  "is_active": true
-}
-```
-
-### Intentar crear un correo duplicado
+### Listar usuarios activos ordenados por nombre
 
 ```bash
-curl -X POST http://127.0.0.1:8000/users \
+curl "http://127.0.0.1:8000/users?is_active=true&order_by=name"
+```
+
+### Actualización parcial
+
+```bash
+curl -X PATCH http://127.0.0.1:8000/users/1 \
   -H "Content-Type: application/json" \
-  -d '{"name":"Otro","email":"ana@sena.edu.co","role":"user","is_active":true}'
+  -d '{"role":"support"}'
 ```
 
-Respuesta esperada (400 Bad Request):
+### Eliminar usuario
 
-```json
-{ "detail": "El correo ya está registrado" }
+```bash
+curl -i -X DELETE http://127.0.0.1:8000/users/2
 ```
+
+## Manejo de errores
+
+| Caso                              | Código |
+|-----------------------------------|--------|
+| Usuario no encontrado             | 404    |
+| Correo duplicado                  | 400    |
+| PATCH sin campos                  | 400    |
+| Rol no permitido / datos inválidos| 422    |
 
 ## Cabeceras personalizadas
 
-Toda respuesta de la API incluye:
+Toda respuesta incluye:
 
 ```
 X-App-Name: device_systems
-X-API-Version: 1.0
+X-API-Version: 3.0.0
 ```
 
-Se pueden verificar con:
+## Capturas
 
-```bash
-curl -i http://127.0.0.1:8000/users
-```
+![Reorganizacion de carpetas](images/reorganizacion-carpetas.png)
 
-## Capturas de Swagger UI
+![Archivo DB](images/archivo-db.png)
 
-[vista general](images/vista1.png)
+![Vista general](images/vista-general.png)
 
-[vista general](images/vista2.png)
+![Vista general](images/vista-general1.png)
 
-[GET users](images/Get-users.png)
+![POST usuario](images/post-users.png)
 
-[GET users](images/Get-users1.png)
+![POST usuario](images/post-users1.png)
 
-[GET users por id](images/get-users-id.png)
+![POST usuario error](images/post-users-error.png)
 
-[GET users por id](images/get-users-id1.png)
+![POST usuario error](images/post-users-error1.png)
 
-[GET users por id (error)](images/get-users-id-error.png)
+![GET usuarios](images/get-users.png)
 
-[GET users por id (error)](images/get-users-id-error1.png)
+![GET usuarios filtro rol](images/filter-admin.png)
 
-[POST users](images/post-users.png)
+![GET usuarios filtro is-active](images/filter-is-active.png)
 
-[POST users](images/post-users1.png)
+![GET usuarios filtro name](images/filter-name.png)
 
-## Reflexión
+![GET usuarios ID](images/get-users-id.png)
 
-Este ejercicio nos permite entender como desarrollar un proyecto con fastAPI, usando Pydantic v2 y uvicorn, entendiendo la conexión y la lógica de JSON
+![GET usuarios ID](images/get-users-id1.png)
+
+![GET usuarios ID (error)](images/get-users-id-error.png)
+
+![GET usuarios ID (error)](images/get-users-id-error1.png)
+
+![PUT usuarios](images/put-users.png.png)
+
+![PUT usuarios](images/put-users.png1.png)
+
+![PUT usuarios (error)](images/put-users-error.png)
+
+![PUT usuarios (error)](images/put-users-error1.png)
+
+![DELETE usuarios](images/delete-user.png)
+
+![DELETE validacion](images/delete-validation.png)
+
+## Reflexión final
+
+Esta actividad nos permite poner en practica el uso de una base de datos vinculandola con APIrest, usando SQLAlchemy y SQLite, reemplazando el almacenamiento en memoria.
