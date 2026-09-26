@@ -1,188 +1,176 @@
 # device_systems
 
-API REST desarrollada con **FastAPI** para la gestión del recurso **usuarios** del sistema `device_systems`.
+API REST con FastAPI, SQLAlchemy, SQLite y Alembic para administrar usuarios, dispositivos tecnológicos y préstamos. La documentación interactiva está disponible en `/docs` y `/redoc`.
 
-Este repositorio evoluciona a través de varias actividades:
+## Evolución
 
-- **EV07** — API inicial: GET y POST, datos en memoria.
-- **EV08** — CRUD completo (PUT/PATCH/DELETE), manejo de errores, Dependency Injection.
-- **EV09** (actual) — Persistencia real con **SQLAlchemy** y **SQLite**, reemplazando el almacenamiento en memoria.
+- **EV07:** consulta y creación de usuarios en memoria.
+- **EV08:** CRUD de usuarios, dependencias y manejo de errores.
+- **EV09:** persistencia de usuarios con SQLAlchemy y SQLite.
+- **EV10:** migraciones Alembic, relaciones entre modelos, inventario de dispositivos, préstamos, devoluciones y consultas con joins.
 
-## Descripción (EV09)
+## Estructura
 
-La API ya no guarda los usuarios en una lista: ahora se almacenan, consultan, actualizan y eliminan desde una base de datos SQLite mediante el ORM **SQLAlchemy**.
-
-## Estructura del proyecto
-
-```
+```text
 device_systems/
+├── alembic/
+│   ├── versions/
+│   └── env.py
 ├── app/
-│   ├── main.py
-│   ├── database/
-│   │   └── connection.py
-│   ├── models/
-│   │   └── user_model.py
-│   ├── schemas/
-│   │   └── user_schema.py
-│   ├── routes/
-│   │   └── user_routes.py
-│   ├── services/
-│   │   └── user_service.py
-│   └── dependencies/
-│       ├── database_dependency.py
-│       └── user_dependencies.py
-├── requirements.txt
-└── README.md
+│   ├── database/connection.py
+│   ├── dependencies/
+│   ├── models/{user,device,loan}_model.py
+│   ├── routes/{user,device,loan}_routes.py
+│   ├── schemas/{user,device,loan}_schema.py
+│   ├── services/{user,device,loan}_service.py
+│   └── main.py
+├── tests/
+├── alembic.ini
+├── pytest.ini
+└── requirements.txt
 ```
 
-## Instalación
+## Instalación y ejecución
 
-```bash
-python -m venv venv
-source venv/bin/activate   # En Windows: venv\Scripts\activate
+Desde la raíz del repositorio, en PowerShell:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-```
-
-## Ejecución
-
-Desde la carpeta raíz del proyecto (`device_systems/`):
-
-```bash
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-Al iniciar, se crea automáticamente el archivo `device_systems.db` (SQLite) con la tabla `users`, si no existe.
+En Linux o macOS, activa el entorno con `source .venv/bin/activate`. La URL predeterminada es `sqlite:///./device_systems.db`; se puede sustituir mediante la variable de entorno `DATABASE_URL`. La aplicación no crea tablas al importarse: el esquema se administra con Alembic.
 
-- Swagger UI: `http://127.0.0.1:8000/docs`
-- ReDoc: `http://127.0.0.1:8000/redoc`
+- Swagger UI: <http://127.0.0.1:8000/docs>
+- ReDoc: <http://127.0.0.1:8000/redoc>
+- Healthcheck: <http://127.0.0.1:8000/>
 
-## Diferencia entre modelo SQLAlchemy y schema Pydantic
+## Modelo relacional
 
-Son dos representaciones distintas del mismo concepto ("usuario"), con propósitos diferentes:
+| Tabla | Campos principales | Relación |
+|---|---|---|
+| `users` | `id`, `name`, `email`, `role`, `is_active`, `created_at` | Un usuario tiene muchos préstamos. |
+| `devices` | `id`, `name`, `serial_number`, `device_type`, `brand`, `is_available`, `created_at` | Un dispositivo aparece en muchos préstamos históricos. |
+| `loans` | `id`, `user_id`, `device_id`, `loan_date`, `return_date`, `status` | Cada préstamo referencia un usuario y un dispositivo existentes. |
 
-- **Modelo SQLAlchemy** (`app/models/user_model.py`, clase `User`): representa la **tabla en la base de datos**. Define columnas, tipos de dato (`Integer`, `String`, `Boolean`, `DateTime`) y restricciones a nivel de base de datos (`nullable=False`, `unique=True`). Es lo que SQLAlchemy usa para generar el SQL y persistir los datos en disco.
-- **Schema Pydantic** (`app/schemas/user_schema.py`, clases `UserCreate`, `UserUpdate`, `UserPatch`, `UserResponse`): representa la **forma de los datos que entran y salen por la API HTTP**. Se usa para validar lo que envía el cliente, para documentar Swagger/OpenAPI, y para decidir exactamente qué campos se exponen en la respuesta (por ejemplo, nunca se expone un campo que no exista en el schema, aunque exista en el modelo).
+Las relaciones ORM usan `relationship()` y `back_populates`. Las claves foráneas restringen la eliminación de usuarios o dispositivos con historial, y SQLite tiene activada la comprobación de claves foráneas. Un préstamo `active` o `overdue` impide marcar el equipo disponible; al devolverlo, el servicio actualiza el préstamo y el equipo en la misma sesión.
 
-En resumen: el modelo habla con la base de datos; el schema habla con el cliente de la API. Mantenerlos separados permite, por ejemplo, cambiar la base de datos sin tocar los contratos de la API, o exigir campos distintos al crear (`UserCreate`) que al responder (`UserResponse`, que además incluye `id` y `created_at`, generados por el servidor).
+## Migraciones Alembic
 
-## Modelo de datos (tabla `users`)
+Alembic está configurado para importar la metadata de los tres modelos. La primera revisión establece la línea base de `users`: crea la tabla si no existe y reconoce una tabla de EV09 existente. La siguiente revisión fue generada con autogeneración y crea `devices` y `loans`; también tolera que esas tablas ya existan en una instalación local sin historial Alembic.
 
-| Campo      | Tipo     | Restricción                     |
-|------------|----------|----------------------------------|
-| id         | Integer  | Primary Key                     |
-| name       | String   | Obligatorio                     |
-| email      | String   | Único y obligatorio             |
-| role       | String   | Obligatorio (admin/support/user)|
-| is_active  | Boolean  | Valor por defecto `true`        |
-| created_at | DateTime | Fecha de creación (automática)  |
+```powershell
+# Estructura inicial (ya incluida en este repositorio)
+alembic init alembic
 
-## Tabla de endpoints
+# Generar una revisión después de modificar modelos
+alembic revision --autogenerate -m "descripcion del cambio"
 
-| Método | Ruta          | Descripción                        | Código éxito   | Errores posibles           |
-|--------|---------------|--------------------------------------|----------------|------------------------------|
-| GET    | `/users`      | Lista usuarios (filtro + orden)     | 200 OK         | —                            |
-| GET    | `/users/{id}` | Consulta un usuario                  | 200 OK         | 404 Not Found                |
-| POST   | `/users`      | Crea un usuario                      | 201 Created    | 400 (email duplicado), 422   |
-| PUT    | `/users/{id}` | Reemplaza el usuario completo        | 200 OK         | 404, 400 (email duplicado)   |
-| PATCH  | `/users/{id}` | Actualiza campos parciales           | 200 OK         | 404, 400 (sin datos/email duplicado) |
-| DELETE | `/users/{id}` | Elimina un usuario                   | 204 No Content | 404 Not Found                |
+# Aplicar migraciones y consultar el historial/estado
+alembic upgrade head
+alembic history
+alembic current
+alembic check
+```
 
-Filtros disponibles en `GET /users`: `?role=`, `?is_active=`, `?order_by=name` o `?order_by=created_at`.
+Revisiones incluidas:
 
-## Ejemplos de peticiones
+- `ev10_users`: línea base compatible con EV09 y creación de `users` en bases nuevas.
+- `ae2a2c362392`: creación autogenerada de `devices` y `loans`, con sus índices y claves foráneas.
 
-### Crear usuario
+Antes de aplicar migraciones sobre una base con información importante, conserva una copia de seguridad. No edites una revisión que ya se haya aplicado en otros ambientes; crea una nueva.
+
+## Endpoints
+
+### Users
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/users` | Lista usuarios; admite `role`, `is_active` y `order_by`. |
+| POST | `/users` | Crea un usuario. |
+| GET | `/users/{user_id}` | Consulta un usuario. |
+| PUT/PATCH | `/users/{user_id}` | Reemplaza o actualiza parcialmente un usuario. |
+| DELETE | `/users/{user_id}` | Elimina si no tiene historial de préstamos. |
+| GET | `/users/{user_id}/loans` | Consulta sus préstamos con usuario y dispositivo relacionados. |
+
+### Devices
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/devices` | Lista equipos con filtros opcionales. |
+| POST | `/devices` | Registra un equipo; `serial_number` debe ser único. |
+| GET | `/devices/{device_id}` | Consulta un equipo. |
+| PUT/PATCH | `/devices/{device_id}` | Reemplaza o actualiza parcialmente un equipo. |
+| DELETE | `/devices/{device_id}` | Elimina si no tiene historial de préstamos. |
+| GET | `/devices/{device_id}/loans` | Consulta el historial de préstamos del equipo. |
+
+Filtros de `GET /devices`: `device_type`, `is_available`, `brand` y `search`. Ejemplos: `/devices?device_type=laptop`, `/devices?is_available=true&brand=lenovo` y `/devices?search=thinkpad`.
+
+### Loans
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/loans` | Lista préstamos con datos de usuario y dispositivo. |
+| GET | `/loans/details` | Consulta detallada equivalente para explorar joins. |
+| POST | `/loans` | Crea un préstamo si existen el usuario y el dispositivo disponible. |
+| GET | `/loans/{loan_id}` | Consulta un préstamo. |
+| PATCH | `/loans/{loan_id}/return` | Registra la devolución y vuelve a habilitar el equipo. |
+
+Filtros combinables para `GET /loans` y `/loans/details`: `status` (`active`, `returned`, `overdue`), `user_email`, `device_type`, `date_from` y `date_to` (fecha ISO 8601). Ejemplos: `/loans?status=active`, `/loans?user_email=ana@sena.edu.co&device_type=laptop`.
+
+Las consultas relacionadas hacen `join()` entre `loans`, `users` y `devices`, y combinan condiciones con `and_()`, `ilike()` y filtros opcionales.
+
+## Ejemplos
+
+Crear un usuario y un equipo:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/users \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Laura Rojas","email":"laura@sena.edu.co","role":"support","is_active":true}'
+curl -X POST http://127.0.0.1:8000/users -H "Content-Type: application/json" -d '{"name":"Ana Perez","email":"ana@sena.edu.co","role":"user"}'
+curl -X POST http://127.0.0.1:8000/devices -H "Content-Type: application/json" -d '{"name":"ThinkPad T14","serial_number":"LEN-2024-001","device_type":"laptop","brand":"Lenovo"}'
 ```
 
-### Listar usuarios activos ordenados por nombre
+Con los ID que devuelven las respuestas, crear y consultar un préstamo:
 
 ```bash
-curl "http://127.0.0.1:8000/users?is_active=true&order_by=name"
+curl -X POST http://127.0.0.1:8000/loans -H "Content-Type: application/json" -d '{"user_id":1,"device_id":1}'
+curl "http://127.0.0.1:8000/loans/details?status=active&device_type=laptop"
+curl -X PATCH http://127.0.0.1:8000/loans/1/return
 ```
 
-### Actualización parcial
+La respuesta detallada incluye el estado y la fecha del préstamo, además de `user` (id, nombre y correo) y `device` (id, nombre, serial y tipo).
 
-```bash
-curl -X PATCH http://127.0.0.1:8000/users/1 \
-  -H "Content-Type: application/json" \
-  -d '{"role":"support"}'
+## Errores y estados HTTP
+
+| Caso | Código |
+|---|---:|
+| Creación correcta | 201 |
+| Consulta, actualización o devolución correcta | 200 |
+| Eliminación correcta, sin contenido | 204 |
+| Usuario, dispositivo o préstamo inexistente | 404 |
+| Correo o serial duplicado | 400 |
+| Equipo no disponible, devolución repetida o eliminación con historial | 409 |
+| Datos, filtros o rango de fechas inválidos | 422 |
+
+Las respuestas conservan las cabeceras `X-App-Name: device_systems` y `X-API-Version: 4.0.0`.
+
+## Pruebas
+
+Las pruebas usan una base SQLite temporal, separada de la base de desarrollo:
+
+```powershell
+pytest -q
 ```
 
-### Eliminar usuario
+Cubren creación de usuario/equipo/préstamo, préstamo de un equipo ocupado, joins y filtros, consulta de historiales, devolución y disponibilidad, serial duplicado, referencias inexistentes, filtros inválidos y protección del historial.
 
-```bash
-curl -i -X DELETE http://127.0.0.1:8000/users/2
-```
+## Evidencias de entrega
 
-## Manejo de errores
+¡[Alembic evidence](images/alembic-evidence.png)
+filtros, joins, devolución y disponibilidad posterior. Las capturas EV09 ya existentes en `images/` corresponden a la actividad anterior; no se presentan como evidencia EV10.
 
-| Caso                              | Código |
-|-----------------------------------|--------|
-| Usuario no encontrado             | 404    |
-| Correo duplicado                  | 400    |
-| PATCH sin campos                  | 400    |
-| Rol no permitido / datos inválidos| 422    |
+## Reflexión
 
-## Cabeceras personalizadas
-
-Toda respuesta incluye:
-
-```
-X-App-Name: device_systems
-X-API-Version: 3.0.0
-```
-
-## Capturas
-
-![Reorganizacion de carpetas](images/reorganizacion-carpetas.png)
-
-![Archivo DB](images/archivo-db.png)
-
-![Vista general](images/vista-general.png)
-
-![Vista general](images/vista-general1.png)
-
-![POST usuario](images/post-users.png)
-
-![POST usuario](images/post-users1.png)
-
-![POST usuario error](images/post-users-error.png)
-
-![POST usuario error](images/post-users-error1.png)
-
-![GET usuarios](images/get-users.png)
-
-![GET usuarios filtro rol](images/filter-admin.png)
-
-![GET usuarios filtro is-active](images/filter-is-active.png)
-
-![GET usuarios filtro name](images/filter-name.png)
-
-![GET usuarios ID](images/get-users-id.png)
-
-![GET usuarios ID](images/get-users-id1.png)
-
-![GET usuarios ID (error)](images/get-users-id-error.png)
-
-![GET usuarios ID (error)](images/get-users-id-error1.png)
-
-![PUT usuarios](images/put-users.png.png)
-
-![PUT usuarios](images/put-users.png1.png)
-
-![PUT usuarios (error)](images/put-users-error.png)
-
-![PUT usuarios (error)](images/put-users-error1.png)
-
-![DELETE usuarios](images/delete-user.png)
-
-![DELETE validacion](images/delete-validation.png)
-
-## Reflexión final
-
-Esta actividad nos permite poner en practica el uso de una base de datos vinculandola con APIrest, usando SQLAlchemy y SQLite, reemplazando el almacenamiento en memoria.
+Alembic permite evolucionar el esquema con cambios revisables y repetibles, sin depender de la creación automática de tablas al iniciar la aplicación. Las relaciones y claves foráneas expresan la integridad del dominio; conservar el historial de préstamos evita perder trazabilidad. Los joins permiten entregar datos útiles al cliente en una consulta y los filtros opcionales hacen que el mismo endpoint sirva para búsquedas concretas sin duplicar rutas.

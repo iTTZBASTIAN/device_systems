@@ -1,29 +1,31 @@
 """
-device_systems - API REST para la gestión de usuarios.
+device_systems - API REST para usuarios, dispositivos y préstamos.
 
 EV07: GET y POST.
 EV08: + PUT, PATCH, DELETE, manejo de errores, Dependency Injection
 y documentación Swagger/OpenAPI mejorada.
-EV09: + persistencia real con SQLAlchemy y SQLite (reemplaza el
-almacenamiento en memoria de las versiones anteriores).
+EV09: persistencia real con SQLAlchemy y SQLite.
+EV10: migraciones Alembic, relaciones entre modelos y consultas con joins.
 """
 
 from fastapi import FastAPI, Request
 
-from app.database.connection import Base, engine
-from app.models import user_model  # noqa: F401 - necesario para registrar el modelo en Base
+from app.routes.device_routes import router as device_router
+from app.routes.loan_routes import router as loan_router
 from app.routes.user_routes import router as user_router
 
 APP_NAME = "device_systems"
-API_VERSION = "3.0.0"
-
-# Crea las tablas en la base de datos si no existen todavía.
-Base.metadata.create_all(bind=engine)
+API_VERSION = "4.0.0"
 
 app = FastAPI(
     title="device_systems API",
-    description="API REST para la gestión de usuarios del sistema device_systems, con persistencia en base de datos vía SQLAlchemy.",
+    description="API REST para gestionar usuarios, dispositivos tecnológicos y préstamos con SQLAlchemy, SQLite y migraciones Alembic.",
     version=API_VERSION,
+    openapi_tags=[
+        {"name": "Users", "description": "Gestión de usuarios y consulta de sus préstamos."},
+        {"name": "Devices", "description": "Inventario, disponibilidad e historial de dispositivos."},
+        {"name": "Loans", "description": "Préstamos, devoluciones, filtros y consultas relacionadas."},
+    ],
 )
 
 
@@ -37,6 +39,8 @@ async def add_custom_headers(request: Request, call_next):
 
 
 app.include_router(user_router)
+app.include_router(device_router)
+app.include_router(loan_router)
 
 
 @app.get("/", tags=["Root"], summary="Healthcheck")

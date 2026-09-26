@@ -18,12 +18,25 @@ from app.schemas.user_schema import (
     UserResponse,
     RoleType,
 )
+from app.schemas.loan_schema import LoanDetailResponse
 from app.dependencies.database_dependency import get_db
 from app.dependencies.user_dependencies import get_user_or_404
 from app.models.user_model import User
 from app.services import user_service
+from app.services import loan_service
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+
+@router.get(
+    "/{user_id}/loans",
+    response_model=list[LoanDetailResponse],
+    summary="Consultar préstamos de un usuario",
+    description="Devuelve el historial del usuario con datos relacionados de los dispositivos.",
+    response_description="Préstamos del usuario.",
+)
+def get_user_loans(user_id: int, db: Session = Depends(get_db)):
+    return loan_service.list_user_loans(db, user_id)
 
 
 @router.get(
